@@ -1,0 +1,24 @@
+# Data Manipulation & Core
+pandas
+numpy
+openpyxl
+pyarrow
+fastparquet
+
+# Machine Learning & Stats
+scikit-learn
+xgboost
+scipy
+
+# Visualization
+matplotlib
+seaborn
+scikit-plot
+
+# Explainability
+shap
+
+# Utilities
+joblib
+jupyter
+ipython

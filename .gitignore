@@ -1,0 +1,18 @@
+# Entornos virtuales
+venv/
+env/
+.env
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Datos crudos (Omitidos por privacidad y peso, según el README)
+data/raw/*
+!data/raw/.gitkeep
+
+# Archivos generados y cacheados por Python
+__pycache__/
+*.py[cod]
+
+# OS generados
+.DS_Store
