@@ -1,8 +1,8 @@
 # 🛒 Motor Predictivo de Recompra B2B/B2C (Online Retail II)
 
-Este repositorio contiene la arquitectura de datos, el flujo de procesamiento ETL, la ingeniería de variables y el motor predictivo de Machine Learning diseñado para **estimar la probabilidad de recompra** de los clientes de la compañía. 
+Este repositorio contiene la arquitectura de datos, el flujo de procesamiento analítico y el motor predictivo de Machine Learning diseñado para **estimar la probabilidad de que un cliente repita compra**. 
 
-El proyecto toma como punto de partida un histórico transaccional a nivel de factura (diciembre 2009 – diciembre 2011) y lo transforma en un activo estratégico para la toma de decisiones comerciales y la optimización del Retorno de Inversión (ROI) en campañas de retención.
+El objetivo final del proyecto no es construir un algoritmo de caja negra, sino **convertir los datos en decisiones de negocio accionables**, permitiendo al equipo de Marketing desplegar acciones de *fidelización* (para clientes con alta propensión) y acciones de *retención/recuperación* (para aquellos con baja propensión).
 
 ---
 
@@ -10,8 +10,8 @@ El proyecto toma como punto de partida un histórico transaccional a nivel de fa
 
 ```text
 ├── data/
-│   ├── raw/                           # Dataset transaccional bruto original (Excluido de Git)
-│   └── processed/                     # Datasets curados y listos para modelar (Parquet/CSV)
+│   ├── raw/                           # Dataset transaccional bruto original (Online Retail II)
+│   └── processed/                     # Datasets curados y listos para modelar (Nivel Cliente)
 ├── notebooks/
 │   ├── 1_EDA_y_Limpieza.ipynb         # Depuración, división temporal e ingeniería de variables
 │   └── 2_Modelo_Recompra.ipynb        # Modelado predictivo, calibración, interpretabilidad y exportación
@@ -25,54 +25,48 @@ El proyecto toma como punto de partida un histórico transaccional a nivel de fa
 
 ---
 
-## 🚀 Metodología y Arquitectura de la Solución
+## 🚀 Metodología y Decisiones Analíticas Clave
 
-El proyecto está diseñado bajo un enfoque pragmático centrado en el negocio, implementado a lo largo de dos fases de desarrollo estructuradas:
+El proyecto está diseñado bajo un enfoque pragmático y orientado al retorno de inversión (ROI), aplicando criterios rigurosos para la limpieza e ingeniería de datos:
 
-### Fase 1: Limpieza, Robustez y Modelado del Perfil del Cliente
-* **Depuración Transaccional:** Filtrado de registros sin identificar (Guest Checkouts), eliminación de transacciones duplicadas y aislamiento de transacciones con precios/cantidades nulas o negativas (devoluciones).
-* **División Temporal Inteligente (Evitando Data Leakage):** Para asegurar una validación empírica robusta, se determinó una fecha de corte en **junio de 2011**:
-  - **Ventana de Observación (Pasado):** 18 meses previos para calcular las variables del cliente.
-  - **Ventana de Predicción (Futuro):** 6 meses posteriores para definir si el cliente efectivamente recompra (Target = 1) o se fuga (Target = 0).
-* **Ingeniería de Características (ADN del Cliente):** 
-  - Métricas de comportamiento **RFM**: Recencia, Frecuencia y Monetary (con capping en el percentil 99 para mitigar outliers de mayoristas).
-  - **Índice de Salud (Recency-Tenure Ratio):** Métrica clave que relativiza la inactividad del cliente frente a su ciclo de vida en la empresa.
-  - **Categorización Temática (NLP):** Procesamiento de lenguaje natural (TF-IDF y K-Means clustering) sobre las descripciones de las facturas para segmentar las preferencias de los usuarios en 8 clústeres temáticos.
-  - **Dinámicas de Compra:** Tendencia de gasto reciente (Momentum), ratios de devolución e internacionalidad.
+### Fase 1: Construcción del Perfil de Cliente (EDA y Limpieza)
+El dataset original se presenta a nivel de ticket (factura). El primer reto fue pivotarlo para construir una **visión única de cliente**:
 
-### Fase 2: Modelado Predictivo, Calibración e Interpretabilidad
-* **Entrenamiento y Validación:** Particionado estratificado train/test (80/20) y validación cruzada de 5 pliegues (Stratified K-Fold).
-* **Modelos Evaluados:** Regresión Logística (L1/L2), K-Nearest Neighbors (KNN), Random Forest y XGBoost.
-* **Optimización (Tuning):** Búsqueda por rejilla (*GridSearchCV*) para controlar el sobreajuste (overfitting). El modelo **XGBoost Optimizado** (restringido a `max_depth: 3` y `learning_rate: 0.01`) se coronó como el campeón absoluto al maximizar la métrica de referencia (**AUC-ROC**).
-* **Calibración Bayesiana (Platt Scaling):** Ajuste sigmoidal para alinear las probabilidades del modelo con la realidad, métrica indispensable para estimar de forma precisa el ROI.
-* **Interpretabilidad Explicable (XAI):** Uso de valores **SHAP** y Coeficientes para abrir la "caja negra" del modelo y determinar las palancas que disparan el riesgo de fuga (`Recency_Tenure_Ratio`) o fomentan la retención (`Total_Quantity`).
+* **Tratamiento de Clientes Anónimos:** Se identificaron registros con `Customer IDs` nulos (Guest Checkouts). Al no tener historial identificable que permita construir una radiografía o medir si recompran o no, **se eliminaron del modelado** para evitar introducir ruido estadístico.
+* **Gestión Bifurcada de Devoluciones:** Las transacciones con cantidades negativas (devoluciones) se excluyeron del cálculo de volumen de facturación pura (`Monetary`) para no contaminarlo. Sin embargo, se utilizaron de forma inteligente para crear un `Ratio de Devoluciones`, una variable predictora clave que actúa como señal de insatisfacción.
+* **División Temporal (Prevención de Data Leakage):** Para construir la variable objetivo de forma honesta, se definió una fecha de corte estricta común para todos los usuarios.
+  - **Ventana Input (Input Features):** Todo lo ocurrido antes de la fecha de corte se utilizó para extraer el historial del cliente.
+  - **Ventana Target:** El comportamiento en los meses posteriores sirvió para etiquetar matemáticamente si hubo recompra (1) o fuga (0).
+* **Ingeniería de Características (Más allá del RFM):** Además de Recencia, Frecuencia y Valor Monetario, se calcularon métricas avanzadas como la distancia temporal entre compras, variedad de productos comprados, ratios de inactividad (`Recency-Tenure Ratio`) y categorización temática mediante NLP sobre las descripciones de factura.
+
+### Fase 2: Modelado Predictivo, Evaluación y Negocio
+* **Benchmark Algorítmico:** Se evaluaron modelos de Regresión Logística, KNN, Random Forest y XGBoost, validando su rendimiento con Validación Cruzada Estratificada.
+* **Métrica de Evaluación Principal:** Siguiendo el rigor del caso de negocio, el modelo se optimizó priorizando la métrica de referencia **AUC-ROC** y la evaluación directa de la **Matriz de Confusión**. Esto permite un análisis global robusto antes de decantarse por afinar `Precision` o `Recall` bajo escenarios específicos de coste financiero.
+* **El Campeón - Random Forest Optimizado:** Tras la optimización de hiperparámetros mediante *GridSearchCV*, el modelo `Random Forest` superó a sus competidores demostrando la mayor estabilidad, generalización y área bajo la curva (AUC).
+* **Interpretabilidad Explicable (XAI):** Se utilizó la librería **SHAP** para asegurar que el modelo fuera transparente y prescriptivo. Identificamos que el *Hábito de Compra (Frecuencia)* y la *Inversión Acumulada (Monetary)* son las principales palancas de lealtad, dictando qué palancas tocar desde Marketing.
 
 ---
 
 ## 📈 Entregables Estratégicos de Negocio
 
-El pipeline analítico genera tres salidas tangibles y accionables:
+El pipeline analítico genera salidas tangibles listas para ser ingeridas por el equipo de negocio:
 
 1. **Preprocesador y Modelo en Producción (`modelos_produccion/`):**
-   - `scaler_rfm.joblib`: Escalador estandarizado matemático entrenado con los datos históricos.
-   - `modelo_recompra_lr.joblib`: Algoritmo clasificador optimizado y calibrado listo para su despliegue en producción.
-2. **Listado de Clientes CRM (`data/processed/predicciones_clientes_recompra.csv`):**
-   - Contiene la base de clientes identificada con su probabilidad de recompra estimada, el ticket medio (AOV), el **Ingreso Esperado (Expected Revenue = Probabilidad × AOV)** y la clasificación en tres segmentos clave de acción CRM: *Alta Probabilidad*, *Dudoso (Incentivar)* y *Riesgo de Fuga*.
-3. **Curva de Ganancias Acumuladas (Lift):**
-   - Demuestra que apuntando las campañas solo al **30% de los clientes** con mayor propensión estimada por el modelo, capturamos a la gran mayoría de los recompradores potenciales, maximizando drásticamente el presupuesto de marketing.
+   - El ecosistema serializado (`scaler_rfm.joblib` y `modelo_recompra_rf.joblib`) listo para su despliegue en ingeniería.
+2. **Listado de Clientes Scoring:**
+   - Base de clientes identificada con su probabilidad exacta de recompra y segmentada en grupos de acción CRM de alto impacto.
+3. **Perspectiva de Presentación Ejecutiva:**
+   - Insights de negocio visuales que escapan del argot técnico, soportados por la **Curva de Ganancias Acumuladas (Lift)**, la cual demuestra cómo focalizar presupuestos en los deciles de mayor propensión multiplica drásticamente el ROI frente a campañas aleatorias a toda la base de datos.
 
 ---
 
 ## 🛠️ Guía de Instalación y Ejecución
 
 ### 1. Requisitos Previos
-Clona el repositorio e instala las dependencias de Python (preferiblemente en un entorno virtual limpio):
+Clona el repositorio e instala las dependencias de Python en un entorno virtual limpio:
 ```bash
-# Crear entorno virtual
 python -m venv .venv
 source .venv/Scripts/activate  # En Windows: .venv\Scripts\activate
-
-# Instalar dependencias
 pip install -r requirements.txt
 ```
 
@@ -87,14 +81,10 @@ Ejecuta secuencialmente los cuadernos de Jupyter en la carpeta `notebooks/`:
 
 ---
 
-## 📅 Hoja de Ruta (Evolución Analítica)
+## 📅 Hoja de Ruta Analítica (Próximos Pasos)
 
-### Corto Plazo (Hacia la versión 1.5): Mejoras Incrementales
-* **A/B Testing en Campañas:** Desplegar pilotos controlados utilizando la segmentación CRM actual para medir el dinero rescatado y refinar los costes de adquisición/retención.
-* **Feature Engineering Detallado:** Desarrollar variables sobre temporalidad semanal (días laborales vs. fines de semana) y varianza de los ciclos de compra del usuario.
-* **Optimización Bayesiana:** Implementar optimización inteligente sobre los hiperparámetros para mejorar el rendimiento predictivo sin aumentar la complejidad del modelo.
+El proyecto asienta unos cimientos sólidos, pero la madurez analítica nos exige plantear los siguientes vectores de evolución:
 
-### Largo Plazo (Hacia la versión 2.0): Transformación Analítica
-* **Modelos de Valor del Cliente (CLV):** Evolucionar del modelo binario de clasificación a un modelo de regresión que estime los ingresos totales en libras que aportará cada cliente.
-* **Modelado de Secuencias (Deep Learning):** Integrar arquitecturas recurrentes (LSTM) o transformers tabulares para estimar el ciclo de compra en tiempo real del usuario.
-* **Motores de Recomendación Interconectados:** Enlazar la propensión a la recompra con recomendaciones hiper-personalizadas de productos específicos (Cross-Sell / Up-Sell) para cada usuario VIP en riesgo de fuga.
+* **Evolución a CLV (Customer Lifetime Value):** Transicionar del actual modelo de clasificación binaria (recompra sí/no) a un modelo de regresión puro que estime los ingresos totales en libras esperados durante el ciclo de vida del usuario.
+* **Motores de Recomendación Interconectados:** Enlazar la predicción de fuga de este modelo con recomendaciones hiper-personalizadas (Cross-Sell / Up-Sell). No solo predecir *quién* se va, sino *qué* producto ofrecerle para retenerlo.
+* **Refinamiento Financiero de Umbrales (Thresholds):** Ajustar el punto de corte probabilístico de decisión introduciendo una matriz de costes real de las campañas. Así se optimizaría matemáticamente el punto exacto de equilibrio entre el coste de invitar erróneamente a alguien (Falso Positivo) frente al coste de perder a un cliente valioso por no impactarle (Falso Negativo).
