@@ -1,52 +1,100 @@
-# Predicción de Recompra B2B (Retail)
+# 🛒 Motor Predictivo de Recompra B2B/B2C (Online Retail II)
 
-Este repositorio contiene la pipeline analítica completa para predecir la probabilidad de recompra de clientes B2B en un entorno e-commerce de retail.
+Este repositorio contiene la arquitectura de datos, el flujo de procesamiento ETL, la ingeniería de variables y el motor predictivo de Machine Learning diseñado para **estimar la probabilidad de recompra** de los clientes de la compañía. 
+
+El proyecto toma como punto de partida un histórico transaccional a nivel de factura (diciembre 2009 – diciembre 2011) y lo transforma en un activo estratégico para la toma de decisiones comerciales y la optimización del Retorno de Inversión (ROI) en campañas de retención.
+
+---
 
 ## 🛠️ Estructura del Proyecto
 
 ```text
 ├── data/
-│   ├── raw/                  # Datos brutos originales (no trackeados en git)
-│   └── processed/            # Datos limpios, modelos serializados y entregables
+│   ├── raw/                           # Dataset transaccional bruto original (Excluido de Git)
+│   └── processed/                     # Datasets curados y listos para modelar (Parquet/CSV)
 ├── notebooks/
-│   ├── 1_EDA_y_Limpieza.ipynb      # Extracción, depuración e ingeniería de características
-│   └── 2_Modelo_Recompra.ipynb     # Modelado predictivo, tuning y MLOps
-├── README.md
-├── requirements.txt
-└── .gitignore
+│   ├── 1_EDA_y_Limpieza.ipynb         # Depuración, división temporal e ingeniería de variables
+│   └── 2_Modelo_Recompra.ipynb        # Modelado predictivo, calibración, interpretabilidad y exportación
+├── modelos_produccion/                # Modelos y escaladores serializados para producción (.joblib)
+├── images/                            # Gráficos e insights de negocio extraídos de los notebooks
+├── Documentacion_Proyecto.md          # Documentación detallada en lenguaje de negocio para stakeholders
+├── README.md                          # Guía técnica e instrucciones del repositorio
+├── requirements.txt                   # Dependencias de Python necesarias
+└── .gitignore                         # Exclusiones de archivos temporales y datos sensibles
 ```
 
-## 🚀 Guía de Ejecución
+---
 
-Sigue estos pasos en estricto orden para reproducir el modelo predictivo.
+## 🚀 Metodología y Arquitectura de la Solución
 
-### 1. Preparación del Entorno
-Instala las dependencias necesarias. Se recomienda usar un entorno virtual (`venv` o `conda`):
+El proyecto está diseñado bajo un enfoque pragmático centrado en el negocio, implementado a lo largo de dos fases de desarrollo estructuradas:
+
+### Fase 1: Limpieza, Robustez y Modelado del Perfil del Cliente
+* **Depuración Transaccional:** Filtrado de registros sin identificar (Guest Checkouts), eliminación de transacciones duplicadas y aislamiento de transacciones con precios/cantidades nulas o negativas (devoluciones).
+* **División Temporal Inteligente (Evitando Data Leakage):** Para asegurar una validación empírica robusta, se determinó una fecha de corte en **junio de 2011**:
+  - **Ventana de Observación (Pasado):** 18 meses previos para calcular las variables del cliente.
+  - **Ventana de Predicción (Futuro):** 6 meses posteriores para definir si el cliente efectivamente recompra (Target = 1) o se fuga (Target = 0).
+* **Ingeniería de Características (ADN del Cliente):** 
+  - Métricas de comportamiento **RFM**: Recencia, Frecuencia y Monetary (con capping en el percentil 99 para mitigar outliers de mayoristas).
+  - **Índice de Salud (Recency-Tenure Ratio):** Métrica clave que relativiza la inactividad del cliente frente a su ciclo de vida en la empresa.
+  - **Categorización Temática (NLP):** Procesamiento de lenguaje natural (TF-IDF y K-Means clustering) sobre las descripciones de las facturas para segmentar las preferencias de los usuarios en 8 clústeres temáticos.
+  - **Dinámicas de Compra:** Tendencia de gasto reciente (Momentum), ratios de devolución e internacionalidad.
+
+### Fase 2: Modelado Predictivo, Calibración e Interpretabilidad
+* **Entrenamiento y Validación:** Particionado estratificado train/test (80/20) y validación cruzada de 5 pliegues (Stratified K-Fold).
+* **Modelos Evaluados:** Regresión Logística (L1/L2), K-Nearest Neighbors (KNN), Random Forest y XGBoost.
+* **Optimización (Tuning):** Búsqueda por rejilla (*GridSearchCV*) para controlar el sobreajuste (overfitting). El modelo **XGBoost Optimizado** (restringido a `max_depth: 3` y `learning_rate: 0.01`) se coronó como el campeón absoluto al maximizar la métrica de referencia (**AUC-ROC**).
+* **Calibración Bayesiana (Platt Scaling):** Ajuste sigmoidal para alinear las probabilidades del modelo con la realidad, métrica indispensable para estimar de forma precisa el ROI.
+* **Interpretabilidad Explicable (XAI):** Uso de valores **SHAP** y Coeficientes para abrir la "caja negra" del modelo y determinar las palancas que disparan el riesgo de fuga (`Recency_Tenure_Ratio`) o fomentan la retención (`Total_Quantity`).
+
+---
+
+## 📈 Entregables Estratégicos de Negocio
+
+El pipeline analítico genera tres salidas tangibles y accionables:
+
+1. **Preprocesador y Modelo en Producción (`modelos_produccion/`):**
+   - `scaler_rfm.joblib`: Escalador estandarizado matemático entrenado con los datos históricos.
+   - `modelo_recompra_lr.joblib`: Algoritmo clasificador optimizado y calibrado listo para su despliegue en producción.
+2. **Listado de Clientes CRM (`data/processed/predicciones_clientes_recompra.csv`):**
+   - Contiene la base de clientes identificada con su probabilidad de recompra estimada, el ticket medio (AOV), el **Ingreso Esperado (Expected Revenue = Probabilidad × AOV)** y la clasificación en tres segmentos clave de acción CRM: *Alta Probabilidad*, *Dudoso (Incentivar)* y *Riesgo de Fuga*.
+3. **Curva de Ganancias Acumuladas (Lift):**
+   - Demuestra que apuntando las campañas solo al **30% de los clientes** con mayor propensión estimada por el modelo, capturamos a la gran mayoría de los recompradores potenciales, maximizando drásticamente el presupuesto de marketing.
+
+---
+
+## 🛠️ Guía de Instalación y Ejecución
+
+### 1. Requisitos Previos
+Clona el repositorio e instala las dependencias de Python (preferiblemente en un entorno virtual limpio):
 ```bash
+# Crear entorno virtual
+python -m venv .venv
+source .venv/Scripts/activate  # En Windows: .venv\Scripts\activate
+
+# Instalar dependencias
 pip install -r requirements.txt
 ```
 
-### 2. Ingesta de Datos (Data Sourcing)
-El archivo original contiene los registros transaccionales históricos.
-1. Descarga o sitúa el archivo original `online_retail_II.xlsx` (o el equivalente).
-2. **Cópialo dentro de la carpeta `data/raw/`**. 
+### 2. Sourcing de Datos
+1. Descarga el archivo de origen `online_retail_II.xlsx`.
+2. Crea el directorio `data/raw/` y deposita el archivo dentro.
 
-*Nota: Por políticas de privacidad y peso (LFS), el directorio `data/raw/` está excluido de Git.*
+### 3. Ejecución del Flujo
+Ejecuta secuencialmente los cuadernos de Jupyter en la carpeta `notebooks/`:
+- **`1_EDA_y_Limpieza.ipynb`**
+- **`2_Modelo_Recompra.ipynb`**
 
-### 3. Ejecución de la Pipeline
+---
 
-#### Paso A: Depuración e Ingeniería de Datos
-Abre y ejecuta **`notebooks/1_EDA_y_Limpieza.ipynb`** de principio a fin.
-* **Qué hace:** Carga las múltiples hojas del Excel, limpia valores nulos/negativos, elimina outliers y calcula métricas RFM y Cohortes.
-* **Qué genera:** Guarda el archivo `data/processed/df_model.parquet`, un dataset tabular maestro listo para que los algoritmos de Machine Learning lo ingieran.
+## 📅 Hoja de Ruta (Evolución Analítica)
 
-#### Paso B: Modelado Predictivo y Extracción de Negocio
-Abre y ejecuta **`notebooks/2_Modelo_Recompra.ipynb`** de principio a fin.
-* **Qué hace:** Ingiere el Parquet, ejecuta el particionado, realiza validación cruzada entre varios algoritmos, optimiza XGBoost y Regresión Logística, extrae la curva Lift, analiza interpretabilidad con SHAP values y etiqueta a toda la base de clientes.
-* **Qué genera:**
-  1. `data/processed/best_xgboost_model.pkl`: El modelo predictivo serializado y optimizado para usar en producción.
-  2. `data/processed/scaler.pkl`: El preprocesador (escalador) necesario para transformar futuros datos.
-  3. `data/processed/predicciones_clientes_recompra.csv`: El **entregable de negocio final**, que contiene el ID de cada cliente, su probabilidad matemática de recompra y el segmento asignado (Alta Probabilidad, Dudoso, Riesgo de Fuga).
+### Corto Plazo (Hacia la versión 1.5): Mejoras Incrementales
+* **A/B Testing en Campañas:** Desplegar pilotos controlados utilizando la segmentación CRM actual para medir el dinero rescatado y refinar los costes de adquisición/retención.
+* **Feature Engineering Detallado:** Desarrollar variables sobre temporalidad semanal (días laborales vs. fines de semana) y varianza de los ciclos de compra del usuario.
+* **Optimización Bayesiana:** Implementar optimización inteligente sobre los hiperparámetros para mejorar el rendimiento predictivo sin aumentar la complejidad del modelo.
 
-## 📊 Interpretabilidad
-Ambos cuadernos están fuertemente documentados. Los gráficos estadísticos (Distribuciones RFM, Curvas ROC, Curva Lift y Feature Importance vía SHAP) incluyen conclusiones analíticas diseñadas para lectura directa por parte de Stakeholders y negocio.
+### Largo Plazo (Hacia la versión 2.0): Transformación Analítica
+* **Modelos de Valor del Cliente (CLV):** Evolucionar del modelo binario de clasificación a un modelo de regresión que estime los ingresos totales en libras que aportará cada cliente.
+* **Modelado de Secuencias (Deep Learning):** Integrar arquitecturas recurrentes (LSTM) o transformers tabulares para estimar el ciclo de compra en tiempo real del usuario.
+* **Motores de Recomendación Interconectados:** Enlazar la propensión a la recompra con recomendaciones hiper-personalizadas de productos específicos (Cross-Sell / Up-Sell) para cada usuario VIP en riesgo de fuga.
