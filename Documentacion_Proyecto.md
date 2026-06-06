@@ -9,108 +9,93 @@ A lo largo de este documento detallamos el proceso end-to-end, desde la obtenci�
 
 ## 1. Introducción y Contexto del Negocio
 
-Como principal Data Scientist de la compañía minorista online, se nos presentó el reto de trabajar con el histórico de transacciones (diciembre 2009 - diciembre 2011). La empresa vende principalmente artículos de regalo y posee un fuerte volumen de negocio B2B (mayoristas). 
+Como principal Data Scientist de la compañía minorista online, se nos presentó el reto de trabajar con el histórico de transacciones del conjunto de datos **Online Retail II** (diciembre 2009 - diciembre 2011). 
 
-El objetivo primordial no es simplemente crear un modelo matemático, sino **transformar datos en decisiones comerciales**. Debemos identificar qué clientes tienen alta probabilidad de volver a comprar (para afianzar su fidelidad con incentivos premium) y qué clientes están en riesgo de fuga (para impactarlos con campañas de reactivación antes de perderlos). Siguiendo las directrices del proyecto y el rigor analítico, evitamos enfoques puramente teóricos y centramos la evaluación en métricas de coste de oportunidad y Retorno de Inversión (ROI).
+El objetivo primordial no es simplemente crear un algoritmo predictivo, sino **transformar datos en decisiones comerciales**. Debemos identificar qué clientes tienen alta probabilidad de volver a comprar (para afianzar su lealtad con incentivos premium) y qué clientes están en riesgo de fuga (para impactarlos con campañas de reactivación eficientes). Siguiendo el rigor analítico, evitamos enfoques puramente teóricos y centramos la evaluación en métricas de coste de oportunidad y Retorno de Inversión (ROI).
 
 ---
 
 ## 2. Fase 1: Limpieza de Datos y Construcción del "Pasado"
 
-Los datos crudos, a nivel de ticket (casi 1 millón de registros), requerían un proceso de limpieza exhaustivo para convertirse en información valiosa.
+Los datos crudos, a nivel de ticket, requerían un proceso de limpieza exhaustivo para pivotarlos a nivel de cliente.
 
 ### 2.1. Depuración del Histórico
-1. **Eliminación de "Guest Checkouts":** Se eliminaron unos 243,000 registros sin `Customer ID`. Al no estar registrados, no podemos crear un historial de cliente (no sabemos si volvieron o no), por lo que introducían ruido al modelo.
-2. **Duplicados y Anomalías Numéricas:** Limpiamos errores del sistema, precios cero o negativos (ajustes contables) y cantidades negativas (devoluciones). Las devoluciones fueron excluidas de los cálculos de volumen para no falsear los ingresos reales, pero se utilizaron para crear un "ratio de devoluciones" por cliente, un claro indicador de insatisfacción.
+1. **Eliminación de "Guest Checkouts":** Se aislaron los registros con `Customer ID` nulos. Al ser compras anónimas, es matemáticamente imposible construir un historial longitudinal o etiquetar si el cliente recompró en el futuro. Conservarlos solo inyectaría ruido, por lo que fueron eliminados sistemáticamente.
+2. **Gestión Bifurcada de Devoluciones:** Limpiamos errores del sistema y transacciones anómalas. Las cantidades negativas (devoluciones) no se restaron burdamente del volumen de compra, sino que fueron excluidas del cálculo de facturación pura (`Monetary`) para no falsear los ingresos reales. Paralelamente, se utilizaron de forma inteligente para derivar un "Ratio de Devoluciones", un potente indicador predictivo de insatisfacción.
 
-### 2.2. Diseño del Marco Temporal (Time Splitting)
-Para evitar el error más grave en Data Science ("Fuga de Datos" o *Data Leakage*), dividimos nuestros datos en dos ventanas usando como fecha de corte **junio de 2011**:
-* **Ventana de Observación (Pasado):** Desde el inicio hasta junio de 2011. Usada exclusivamente para calcular el comportamiento del cliente.
-* **Ventana de Predicción (Futuro):** Los últimos 6 meses del dataset. Usada para ver, de los clientes que teníamos en el pasado, **quién volvió a comprar (1)** y **quién no (0)**. 
+### 2.2. Diseño del Marco Temporal (Prevención de Data Leakage)
+Para evitar el error más grave en Machine Learning ("Fuga de Datos" o *Data Leakage*), establecemos una fecha de corte estricta (**junio de 2011**) idéntica para todos los usuarios:
+* **Ventana de Observación (Input):** Todo lo ocurrido hasta junio de 2011. Usada exclusivamente para calcular el historial de consumo del cliente.
+* **Ventana de Predicción (Target):** Los últimos meses del dataset. Usada como "oráculo" para ver quién efectivamente volvió a comprar (Target = 1) y quién se fugó (Target = 0).
 
-El resultado fue un dataset perfectamente balanceado, con un 51.88% de clientes retenidos y un 48.12% de clientes fugados.
+Esta división generó un target excepcionalmente saludable (aproximadamente un **52% de retención frente a un 48% de fugas**), proporcionando un terreno ideal para el modelado algorítmico sin sufrir los problemas crónicos de las clases desbalanceadas.
 
 ---
 
-## 3. Ingeniería de Características: Definiendo el ADN del Cliente
+## 3. Ingeniería de Características: El ADN del Cliente
 
-Transformamos las facturas en un dataset donde cada fila es un cliente único. Para que el modelo pueda predecir, necesita "entender" a la persona a través de variables de negocio (Feature Engineering):
+Transformamos las facturas en un dataset donde cada fila es un cliente único perfilado mediante *Feature Engineering*:
 
-1. **Variables RFM Tradicionales:** Recencia (días desde la última compra), Frecuencia (número de tickets) y Valor Monetario (gasto total).
-2. **Aficiones y Estilo de Vida (NLP):** Analizamos empíricamente las descripciones de los productos más vendidos usando lenguaje natural, extrayendo 8 clústeres reales como *Home Decor*, *Vintage Retro*, o *Party Occasions*.
-3. **Métricas de Ciclo de Vida:** Ticket medio, variedad de productos comprados, antigüedad en días y la **Tendencia de Gasto (Momentum)**, midiendo si el cliente aceleró o frenó sus compras recientemente.
+1. **Variables RFM Expandidas:** Recencia (días desde la última compra), Frecuencia (número de tickets) y Valor Monetario (gasto total).
+2. **Estilo de Vida (NLP):** Categorización temática aplicando procesamiento de lenguaje natural (TF-IDF y K-Means) sobre las descripciones de los artículos.
+3. **Dinámicas de Compra:** Frecuencia de devoluciones, variedad de artículos, y el *Momentum* (Tendencia de gasto reciente).
 
 ### 3.1. La Variable Estrella: Índice de Salud (Recency-Tenure Ratio)
-El tiempo sin comprar (`Recency`) es engañoso: 60 días inactivo es grave para alguien que compra semanalmente, pero normal para un mayorista semestral. Creamos el **Recency-Tenure Ratio** (Recencia / Antigüedad). Si el ratio se acerca a 1, significa que el cliente ha pasado casi todo su ciclo de vida "inactivo" (alto riesgo de fuga).
+El tiempo sin comprar (`Recency`) es engañoso: 60 días inactivo es grave para alguien que compra semanalmente, pero normal para un mayorista. Para solucionarlo, creamos el **Recency-Tenure Ratio** (Recencia / Antigüedad). Si el ratio se acerca a 1, significa que el cliente ha pasado casi todo su ciclo vital inactivo, disparando las alarmas de riesgo.
 
 ![Heatmap Correlaciones](images/1_EDA_y_Limpieza_img_2.png)
-*Insight del Heatmap:* Confirmamos matemáticamente que la `Frequency` y el `Monetary` están íntimamente ligados (la retención se basa en la recurrencia, no en compras únicas abultadas).
+*Insight Visual:* Confirmamos matemáticamente la fuerte correlación positiva entre `Frequency` y `Monetary`. La rentabilidad sostenida se basa en la recurrencia, no en una única cesta masiva.
 
 ---
 
 ## 4. Diagnóstico de Negocio (Business Storytelling)
 
-Antes de predecir el comportamiento individual, debíamos entender el comportamiento macro.
+Antes de predecir el futuro, diagnosticamos el macroentorno comercial:
 
 ### 4.1. Estacionalidad Extrema (El Efecto Q4)
 ![Evolución Mensual](images/2_Modelo_Recompra_img_0.png)
-Descubrimos que la facturación de la empresa tiene un pico monumental en el último trimestre (Navidad). Perder a un cliente justo antes del Q4 tiene un coste de oportunidad enorme. Las campañas de retención deben ser sumamente agresivas entre agosto y octubre.
+La facturación de la empresa tiene un pico monumental en el último trimestre. Perder a un cliente justo antes del Q4 tiene un coste de oportunidad enorme. Las campañas predictivas de retención deben ser agresivas entre los meses de agosto y octubre.
 
 ### 4.2. Análisis de Pareto (Concentración del Riesgo)
 ![Curva de Pareto](images/2_Modelo_Recompra_img_1.png)
-Confirmamos que aproximadamente un **30% de los clientes genera el 80% de los ingresos totales**. Esto justifica económicamente nuestro modelo predictivo: no necesitamos lanzar campañas masivas con descuentos a todo el mundo (destruyendo el margen), sino usar el modelo como un radar para detectar y proteger a este núcleo VIP de alto valor.
-
-### 4.3. Productos "Gancho" y Desgaste (Cohortes)
-* **Los Cebos de Retención:** Extrajimos el Top 10 de productos estrella para los clientes VIP. Artículos como el *REGENCY CAKESTAND 3 TIER* son los verdaderos fidelizadores. Recomendamos al equipo de Marketing usarlos en las promociones hiper-personalizadas en vez de descuentos genéricos.
-* **El Abismo del Segundo Mes:** Nuestro análisis de cohortes (ver abajo) demostró que la mayor tasa de fuga se produce tras el primer mes. Las estrategias de "onboarding" post-primera compra son críticas.
-![Cohortes](images/2_Modelo_Recompra_img_4.png)
+Confirmamos que apenas un **21.6% de los clientes genera el 80% de los ingresos**. Esto justifica nuestra arquitectura predictiva: no podemos lanzar campañas de descuento masivas "para todos" (destruyendo el margen), sino usar el algoritmo como radar para detectar y blindar exclusivamente a este núcleo VIP.
 
 ---
 
 ## 5. El Motor Predictivo (Machine Learning)
 
-Sometimos a cuatro familias de algoritmos a una rigurosa competición matemática (validación cruzada), priorizando la métrica **AUC** (Área bajo la curva ROC), ya que evalúa la capacidad pura del modelo para separar a los recompradores de los fugitivos en todo el espectro de probabilidades.
+Sometimos a cuatro familias algorítmicas (Regresión Logística, KNN, Random Forest, XGBoost) a una rigurosa competición matemática.
 
-1. **Random Forest y Regresión Logística** dominaron inicialmente, indicando relaciones fuertemente lineales en los datos.
-2. **XGBoost (El Campeón Optimizado):** Inicialmente sobreajustaba (se aprendía el dataset de memoria). Tras una fase de *Optimización Exhaustiva (GridSearchCV)*, restringimos su profundidad y velocidad de aprendizaje. El **XGBoost Optimizado** logró el mayor desempeño predictivo con una brecha de error (overfitting) mínima.
+### 5.1. Selección de Métricas (AUC-ROC y Matriz de Confusión)
+Por indicación directa de la casuística de negocio, evitamos guiarnos ciegamente por el *Accuracy* global. Utilizamos el **Área bajo la Curva ROC (AUC)** como métrica reina, ya que evalúa la capacidad pura del modelo para separar a los recompradores de los fugitivos. Paralelamente, utilizamos la **Matriz de Confusión** como validador final de los aciertos y errores tangibles del algoritmo.
 
-### 5.1. Impacto en Negocio: La Curva Lift
-![Curva Lift](images/2_Modelo_Recompra_img_9.png)
-*Insight Directivo:* ¿Por qué nos importa este modelo? Si Marketing solo tiene presupuesto para enviar un catálogo premium al 30% de la base de datos, hacerlo de forma aleatoria captaría solo al 30% de los futuros compradores. Utilizando nuestro modelo, enfocándonos en el 30% con mayor probabilidad, capturamos a **la inmensa mayoría de los clientes retenibles**. Esto multiplica drásticamente el ROI de la campaña.
+### 5.2. El Campeón: Random Forest Optimizado
+Tras una optimización exhaustiva mediante *GridSearchCV*, el modelo **Random Forest** se coronó como el campeón indiscutible, demostrando la mayor estabilidad, generalización y AUC frente al sobreajuste detectado inicialmente en arquitecturas como XGBoost.
 
-### 5.2. Umbrales Dinámicos (Precision vs Recall)
-Adecuamos el modelo al bolsillo de Marketing:
-* **Coste Alto de Campaña (Ej. Regalo físico):** Subimos el umbral matemático. Maximizamos la **Precisión** para no tirar dinero en falsos positivos.
-* **Coste Bajo (Ej. Email masivo) pero cliente valioso:** Bajamos el umbral. Maximizamos el **Recall** para no dejar escapar a ningún cliente VIP que amague con irse.
+### 5.3. Estrategia de Umbrales (Precision vs Recall)
+Adecuamos el modelo de probabilidades a la cuenta de resultados de Marketing:
+Basándonos en nuestra curva de Precisión-Recall, abandonamos el corte clásico del 0.50 y establecimos **dos umbrales financieros**:
+* **Umbral 0.70 (Alta Propensión):** Maximiza la *Precisión*. Usado para acciones caras (ej. regalos físicos), donde un Falso Positivo (gastar en alguien que no iba a comprar de todas formas) destruye el ROI.
+* **Umbral 0.40 (Acciones de Reactivación):** Maximiza el *Recall*. Usado para campañas de bajo coste (ej. email automatizado), donde atrapar un Verdadero Positivo (recuperar al cliente) compensa con creces los envíos inútiles.
 
 ---
 
-## 6. Interpretabilidad: Las Palancas de la Retención
+## 6. Interpretabilidad (XAI): Las Palancas de Retención
 
-Un modelo "caja negra" no es útil para la dirección estratégica. Extraímos qué variables pesaban más en la toma de decisión del algoritmo (Feature Importance y Valores SHAP):
+Un modelo "caja negra" no es útil para la dirección. Utilizando Valores **SHAP** sobre el Random Forest, abrimos el motor para extraer de forma transparente qué variables detonan realmente las decisiones del algoritmo:
 
 ![SHAP Values](images/2_Modelo_Recompra_img_10.png)
 
-* **El Asesino Silencioso (Riesgo Crítico):** El `Recency_Tenure_Ratio`. Si este indicador aumenta, el cliente se asume como perdido. Las alarmas de retención deben activarse en cuanto este ratio se desvía de lo normal.
-* **El Protector de Ingresos (Impulsor de Retención):** El `Total_Quantity` y la `Frequency`. Acostumbrar al cliente a hacer pedidos repetidos (hábitos de consumo) protege más la facturación a largo plazo que empujarlo a hacer una sola compra muy cara (`Monetary`).
-
-### 6.1. El Entregable
-El modelo fue exportado para producción (MLOps), y se generó el listado final para el CRM cruzando la **Probabilidad de Recompra con el Ticket Medio**, obteniendo el **Ingreso Esperado (Expected Revenue)** por cliente, permitiendo a la empresa priorizar llamadas y correos basándose puramente en impacto económico.
+1. **El Hábito como Rey (`Frequency`):** El predictor de lealtad más potente. Fomentar visitas recurrentes genera un anclaje a largo plazo inquebrantable.
+2. **Valor Bruto Acumulado (`Monetary`):** Barrera psicológica de salida. La alta inversión económica pasada reduce drásticamente el riesgo de fuga.
+3. **El Asesino Silencioso (`Recency_Tenure_Ratio`):** El principal factor de riesgo. Si esta métrica de inactividad relativa aumenta, la probabilidad matemática de recuperación se hunde de inmediato.
 
 ---
 
-## 7. Hoja de Ruta y Próximos Pasos (Evolución del Producto)
+## 7. Hoja de Ruta Analítica (Madurez y Próximos Pasos)
 
-Este proyecto representa un Producto Mínimo Viable (MVP - V 1.0) sumamente robusto y rentable. Sin embargo, en Data Science el valor real se genera iterando. Proponemos la siguiente hoja de ruta dividida en "Quick Wins" (corto plazo) y "Transformación" (largo plazo):
+Este proyecto representa un Producto Mínimo Viable analítico sumamente robusto. Sin embargo, proponemos los siguientes vectores de evolución para demostrar madurez analítica en el ecosistema comercial de la empresa:
 
-### 7.1. Corto Plazo: Mejoras Incrementales (Hacia la V 1.5)
-Antes de cambiar la arquitectura, debemos exprimir el modelo actual con acciones de bajo coste y alto impacto:
-1. **A/B Testing en Vivo:** Desplegar las predicciones actuales sobre una pequeña porción del tráfico real (grupo de tratamiento) y comparar la retención contra un grupo de control. Esto validará empíricamente el ROI (Lift) antes de hacer un despliegue masivo.
-2. **Feature Engineering Granular:** Incorporar variables más finas sin cambiar el algoritmo. Por ejemplo: extraer el patrón de compras (¿compra en fin de semana o entre semana?), o calcular la varianza de días entre compras para detectar a los clientes más erráticos.
-3. **Optimización Bayesiana:** Sustituir la búsqueda en cuadrícula (GridSearch) por algoritmos probabilísticos para rascar unas décimas más de AUC ajustando el XGBoost con mayor precisión.
-
-### 7.2. Largo Plazo: Evolución Tecnológica (Hacia la V 2.0)
-Una vez validada la versión basal, el salto cualitativo del producto implicará:
-1. **De Clasificación a Predicción de Valor (CLV Total):** Pasar de predecir de forma binaria (Comprará / No comprará) a modelos de regresión avanzados para estimar el **Customer Lifetime Value (CLV)** exacto en libras que ese cliente dejará en el próximo año.
-2. **Modelos Secuenciales (Deep Learning):** Reemplazar la "foto estática" actual (RFM) por arquitecturas neuronales secuenciales (como LSTMs o Transformers tabulares) para aprender el "ritmo temporal" exacto de las compras y predecir no solo *si* comprará, sino *cuándo* lo hará.
-3. **Motores de Recomendación (Cross-Sell):** Complementar la alerta de fuga con filtrado colaborativo. Si sabemos que un VIP se va, sugerir automáticamente a Marketing los 3 artículos "gancho" específicos con mayor probabilidad de conversión para *ese* usuario.
+1. **Customer Lifetime Value (CLV):** Transicionar del actual modelo de clasificación binaria (recompra sí/no) a un modelo de regresión puro que estime directamente los ingresos totales (en libras) esperados a lo largo del ciclo de vida del usuario.
+2. **Motores de Recomendación (Cross-Sell Interconectado):** Si el modelo detecta que un cliente VIP está en riesgo crítico de fuga, no basta con enviar una alerta genérica. El siguiente paso tecnológico es conectar el algoritmo con un sistema de filtrado colaborativo que decida automáticamente los 3 artículos "gancho" específicos con mayor probabilidad de retener a *ese* usuario concreto.
+3. **A/B Testing en Vivo:** Desplegar las predicciones actuales sobre un segmento aislado de la base de datos (grupo de tratamiento) y comparar la retención económica contra un grupo de control. Esta será la prueba irrefutable del Lift generado por el algoritmo.
